@@ -1,3 +1,5 @@
+This is forked from [jeremydaly/dynamodb-streams-processor](https://github.com/jeremydaly/dynamodb-streams-processor) and updated to match our usage a bit better. Please refer to [this commit](https://github.com/HVNTapp/dynamodb-streams-processor/commit/0a6a3dffbb51397bdd98b4750185bb925df7b3e9) for main changes.
+
 # DynamoDB Streams Processor
 
 [![Build Status](https://travis-ci.org/jeremydaly/dynamodb-streams-processor.svg?branch=master)](https://travis-ci.org/jeremydaly/dynamodb-streams-processor)
