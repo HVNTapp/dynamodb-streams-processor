@@ -1,5 +1,3 @@
-'use strict'
-
 /**
  * DynamoDB Streams Processor: A simple tool for working with DynamoDB Streams
  * @author Jeremy Daly <jeremy@jeremydaly.com>
@@ -14,64 +12,80 @@ const converter = require('aws-sdk/lib/dynamodb/converter')
 const Set = require('aws-sdk/lib/dynamodb/set')
 
 // Require deep-object-diff library for comparing records
-const { diff, addedDiff, deletedDiff, detailedDiff, updatedDiff } = require('deep-object-diff')
+const {
+  diff,
+  addedDiff,
+  deletedDiff,
+  detailedDiff,
+  updatedDiff,
+} = require('deep-object-diff')
 
 // Export main function
-module.exports = (records,diffType=false,options={}) => {
+module.exports = (records, diffType = false, options = {}) => {
   if (Array.isArray(records)) {
-    return records.map(rec => {
-      // unmarshall dynamodb items if they exist
-      let Keys = rec.dynamodb && rec.dynamodb.Keys ? unmarshall(rec.dynamodb.Keys,options) : {}
-      let NewImage = rec.dynamodb && rec.dynamodb.NewImage ? unmarshall(rec.dynamodb.NewImage,options) : {}
-      let OldImage = rec.dynamodb && rec.dynamodb.OldImage ? unmarshall(rec.dynamodb.OldImage,options) : {}
-
-      // return new record with unmarshalled items
-      return Object.assign(
-        {},
-        rec,
-        rec.dynamodb ? {
-          dynamodb: Object.assign(
-            {},
-            rec.dynamodb,
-            { Keys }, // should always be there
-            rec.dynamodb.NewImage ? { NewImage } : {},
-            rec.dynamodb.OldImage ? { OldImage } : {},
-            diffType ? { Diff: compare(OldImage,NewImage,diffType) } : {}
-          )
-        } : {}
-      )
-    })
+    return records.map((record) => process(record, diffType, options))
+  } else if (records instanceof Object) {
+    return process(records, diffType, options)
   } else {
-    throw 'records must be an array'
+    throw new Error('Input must be array or object')
+  }
+}
+
+const process = (rec, diffType, options) => {
+  if (!rec.dynamodb) {
+    throw new Error('Record is missing dynamodb property')
+  }
+
+  const Keys = rec.dynamodb.Keys
+    ? unmarshall(rec.dynamodb.Keys, options)
+    : null
+  const NewImage = rec.dynamodb.NewImage
+    ? unmarshall(rec.dynamodb.NewImage, options)
+    : null
+  const OldImage = rec.dynamodb.OldImage
+    ? unmarshall(rec.dynamodb.OldImage, options)
+    : null
+  const Diff =
+    diffType &&
+    rec.dynamodb.NewImage &&
+    rec.dynamodb.OldImage &&
+    compare(OldImage, NewImage, diffType)
+
+  return {
+    ...rec,
+    dynamodb: {
+      ...(Keys && { Keys }),
+      ...(NewImage && { NewImage }),
+      ...(OldImage && { OldImage }),
+      ...(Diff && { Diff }),
+    },
   }
 }
 
 // unmarshalls the object and converts sets into arrays
-const unmarshall = (obj,options) => {
+const unmarshall = (obj, options) => {
   // unmarshall the object
-  let item = converter.unmarshall(obj,options)
+  const item = converter.unmarshall(obj, options)
   // check each top level key for sets and convert appropriately
-  return options.wrapSets ? item
-    : Object.keys(item).reduce((acc,key) => {
-      return Object.assign(acc,{
-        [key]: item[key] instanceof Set ? item[key].values : item[key]
-      })
-    },{})
+  return options.wrapSets
+    ? item
+    : Object.entries(item).reduce(
+      (acc, [k, v]) => ({
+        ...acc,
+        [k]: v instanceof Set ? v.values : v,
+      }),
+      {}
+    )
 }
-
 
 // Use deep-object-diff to compare records
-const compare = (OldImage,NewImage,diffType) => {
-  switch(diffType) {
-    case 'added':
-      return addedDiff(OldImage,NewImage)
-    case 'deleted':
-      return deletedDiff(OldImage,NewImage)
-    case 'updated':
-      return updatedDiff(OldImage,NewImage)
-    case 'detailed':
-      return detailedDiff(OldImage,NewImage)
-    default:
-      return diff(OldImage,NewImage)
-  }
-}
+const compare = (a, b, diffType) =>
+  diffType === 'added'
+    ? addedDiff(a, b)
+    : diffType === 'deleted'
+      ? deletedDiff(a, b)
+      : diffType === 'updated'
+        ? updatedDiff(a, b)
+        : diffType === 'detailed'
+          ? detailedDiff(a, b)
+          : diff(a, b)
