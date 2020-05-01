@@ -17,53 +17,29 @@ const {
   addedDiff,
   deletedDiff,
   detailedDiff,
-  updatedDiff,
+  updatedDiff
 } = require('deep-object-diff')
 
-// Export main function
-module.exports = (records, diffType = false, options = {}) => {
-  if (Array.isArray(records)) {
-    return records.map((record) => process(record, diffType, options))
-  } else if (records instanceof Object) {
-    return process(records, diffType, options)
-  } else {
-    throw new Error('Input must be array or object')
-  }
-}
-
-const process = (rec, diffType, options) => {
-  if (!rec.dynamodb) {
-    throw new Error('Record is missing dynamodb property')
-  }
-
-  const Keys = rec.dynamodb.Keys
-    ? unmarshall(rec.dynamodb.Keys, options)
-    : null
-  const NewImage = rec.dynamodb.NewImage
-    ? unmarshall(rec.dynamodb.NewImage, options)
-    : null
-  const OldImage = rec.dynamodb.OldImage
-    ? unmarshall(rec.dynamodb.OldImage, options)
-    : null
-  const Diff =
-    diffType &&
-    rec.dynamodb.NewImage &&
-    rec.dynamodb.OldImage &&
-    compare(OldImage, NewImage, diffType)
-
-  return {
-    ...rec,
-    dynamodb: {
-      ...(Keys && { Keys }),
-      ...(NewImage && { NewImage }),
-      ...(OldImage && { OldImage }),
-      ...(Diff && { Diff }),
-    },
+// Return function instead of taking the parameters and applying them here
+const diffFunction = diffType => {
+  switch (diffType) {
+    case 'added':
+      return addedDiff
+    case 'deleted':
+      return deletedDiff
+    case 'updated':
+      return updatedDiff
+    case 'detailed':
+      return detailedDiff
+    default:
+      return diff
   }
 }
 
 // unmarshalls the object and converts sets into arrays
-const unmarshall = (obj, options) => {
+const unmarshallWith = options => obj => {
+  if (!obj) return undefined
+
   // unmarshall the object
   const item = converter.unmarshall(obj, options)
   // check each top level key for sets and convert appropriately
@@ -72,20 +48,49 @@ const unmarshall = (obj, options) => {
     : Object.entries(item).reduce(
       (acc, [k, v]) => ({
         ...acc,
-        [k]: v instanceof Set ? v.values : v,
+        [k]: v instanceof Set ? v.values : v
       }),
       {}
     )
 }
 
-// Use deep-object-diff to compare records
-const compare = (a, b, diffType) =>
-  diffType === 'added'
-    ? addedDiff(a, b)
-    : diffType === 'deleted'
-      ? deletedDiff(a, b)
-      : diffType === 'updated'
-        ? updatedDiff(a, b)
-        : diffType === 'detailed'
-          ? detailedDiff(a, b)
-          : diff(a, b)
+const processWith = (diffType, options) => record => {
+  if (!record.dynamodb) {
+    throw new Error('Record is missing dynamodb property')
+  }
+
+  // Pre-apply unmarshal-function with options so we don't repeat ourselves
+  const unmarshall = unmarshallWith(options)
+
+  const Keys = unmarshall(record.dynamodb.Keys)
+  const NewImage = unmarshall(record.dynamodb.NewImage)
+  const OldImage = unmarshall(record.dynamodb.OldImage)
+  const Diff =
+    diffType &&
+    OldImage &&
+    NewImage &&
+    diffFunction(diffType)(OldImage, NewImage)
+
+  return {
+    ...record,
+    dynamodb: {
+      ...(Keys && { Keys }),
+      ...(NewImage && { NewImage }),
+      ...(OldImage && { OldImage }),
+      ...(Diff && { Diff })
+    }
+  }
+}
+
+// Export main function
+module.exports = (records, diffType = false, options = {}) => {
+  const process = processWith(diffType, options)
+  switch (true) {
+    case Array.isArray(records):
+      return records.map(process)
+    case records instanceof Object:
+      return process(records)
+    default:
+      throw new Error('Input must be array or object')
+  }
+}
